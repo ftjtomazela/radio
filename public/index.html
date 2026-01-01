@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Radio Walkie Talkie</title>
+    <style>
+        body { background-color: #1a1a1a; color: #00ff41; font-family: monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; user-select: none; overflow: hidden; }
+        
+        #ptt-btn {
+            width: 250px; height: 250px;
+            border-radius: 50%;
+            border: 8px solid #333;
+            background: radial-gradient(circle, #cc0000 0%, #660000 100%);
+            color: white; font-weight: bold; font-size: 28px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.8);
+            display: flex; align-items: center; justify-content: center;
+        }
+        #ptt-btn:active, .transmitting {
+            background: radial-gradient(circle, #ff3333 0%, #990000 100%) !important;
+            transform: scale(0.95);
+            box-shadow: 0 0 50px #ff0000 !important;
+        }
+        .status { margin-top: 30px; font-size: 20px; letter-spacing: 2px; }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="status" id="status-text">STANDBY</div>
+    <div id="ptt-btn">PTT</div>
+
+    <script>
+        const socket = io();
+        const ptt = document.getElementById('ptt-btn');
+        const status = document.getElementById('status-text');
+        let localStream;
+        
+        // Sons
+        const sndOn = new Audio('https://www.soundjay.com/communication/sounds/radio-click-1.mp3');
+        const sndOff = new Audio('https://www.soundjay.com/communication/sounds/radio-noise-3.mp3');
+
+        // Ativa áudio no primeiro clique (obrigatório para iPhone)
+        document.body.addEventListener('click', async () => {
+            if(!localStream) {
+                try { 
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
+                    status.innerText = "SISTEMA PRONTO";
+                } catch(e) { alert("Microfone bloqueado!"); }
+            }
+        }, {once:true});
+
+        // Lógica de falar
+        function startTx(e) {
+            if(e.cancelable) e.preventDefault();
+            if(!localStream) return;
+            ptt.classList.add('transmitting');
+            status.innerText = "TRANSMITINDO...";
+            status.style.color = "red";
+            sndOn.play();
+            socket.emit('start_tx');
+            
+            // Envia áudio em pedaços
+            window.mediaRecorder = new MediaRecorder(localStream);
+            window.mediaRecorder.ondataavailable = e => socket.emit('voice_data', e.data);
+            window.mediaRecorder.start(100);
+        }
+
+        function endTx(e) {
+            if(e.cancelable) e.preventDefault();
+            ptt.classList.remove('transmitting');
+            status.innerText = "STANDBY";
+            status.style.color = "#00ff41";
+            if(window.mediaRecorder) window.mediaRecorder.stop();
+            sndOff.play();
+            socket.emit('end_tx');
+        }
+
+        // Eventos
+        ptt.addEventListener('mousedown', startTx); ptt.addEventListener('mouseup', endTx);
+        ptt.addEventListener('touchstart', startTx, {passive:false}); ptt.addEventListener('touchend', endTx, {passive:false});
+
+        // Receber áudio
+        socket.on('play_voice', (data) => {
+            const audio = new Audio(URL.createObjectURL(new Blob([data])));
+            audio.play();
+        });
+        socket.on('remote_start_tx', () => { status.innerText = "RECEBENDO..."; status.style.color = "orange"; });
+        socket.on('remote_end_tx', () => { status.innerText = "STANDBY"; status.style.color = "#00ff41"; sndOff.play(); });
+    </script>
+</body>
+</html>
