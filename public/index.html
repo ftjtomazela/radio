@@ -3,53 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Radio Walkie Talkie</title>
+    <title>Radio Tático Pro</title>
     <style>
-        body { background-color: #1a1a1a; color: #00ff41; font-family: monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; user-select: none; overflow: hidden; }
+        body { background-color: #121212; color: #00ff41; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
         
+        #top-info { position: absolute; top: 20px; width: 100%; text-align: center; }
+        #my-id { font-size: 14px; opacity: 0.7; margin-bottom: 5px; }
+        .status { font-size: 22px; font-weight: bold; letter-spacing: 2px; text-shadow: 0 0 10px #00ff41; }
+        #last-seen { font-size: 12px; color: #888; margin-top: 10px; }
+
         #ptt-btn {
-            width: 250px; height: 250px;
-            border-radius: 50%;
-            border: 8px solid #333;
-            background: radial-gradient(circle, #cc0000 0%, #660000 100%);
-            color: white; font-weight: bold; font-size: 28px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.8);
+            width: 240px; height: 240px; border-radius: 50%;
+            border: 6px solid #333; background: radial-gradient(circle, #cc0000 0%, #550000 100%);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
             display: flex; align-items: center; justify-content: center;
+            font-size: 30px; font-weight: bold; color: white; user-select: none;
+            transition: transform 0.1s; z-index: 1; position: relative;
         }
         #ptt-btn:active, .transmitting {
-            background: radial-gradient(circle, #ff3333 0%, #990000 100%) !important;
             transform: scale(0.95);
-            box-shadow: 0 0 50px #ff0000 !important;
+            background: radial-gradient(circle, #ff3333 0%, #990000 100%) !important;
+            box-shadow: 0 0 50px rgba(255, 0, 0, 0.6) !important;
         }
-        .status { margin-top: 30px; font-size: 20px; letter-spacing: 2px; }
+
+        /* Botão REPLAY */
+        #replay-btn {
+            margin-top: 30px;
+            padding: 10px 25px;
+            background: #d4a017; color: #000;
+            border: none; border-radius: 5px;
+            font-weight: bold; font-family: monospace;
+            cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        #replay-btn:active { transform: scale(0.95); background: #ffcc00; }
+
+        /* Chat */
+        #chat-toggle {
+            position: absolute; bottom: 30px; right: 30px;
+            width: 60px; height: 60px; background: #333; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px; cursor: pointer; border: 2px solid #00ff41; z-index: 10;
+        }
+        #badge {
+            position: absolute; top: -5px; right: -5px;
+            background: red; color: white; width: 20px; height: 20px;
+            border-radius: 50%; font-size: 12px; display: flex; align-items: center; justify-content: center;
+            display: none;
+        }
+        #chat-box {
+            position: fixed; bottom: -100%; left: 0; width: 100%; height: 60%;
+            background: #1a1a1a; border-top: 2px solid #00ff41;
+            transition: bottom 0.3s; z-index: 20; display: flex; flex-direction: column;
+        }
+        .chat-open { bottom: 0 !important; }
+        #messages { flex: 1; overflow-y: auto; padding: 15px; text-align: left; }
+        .msg-line { margin-bottom: 8px; font-size: 14px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        .msg-user { color: #00ff41; font-weight: bold; }
+        .msg-text { color: #ddd; }
+        #input-area { display: flex; padding: 10px; background: #222; }
+        #msg-input { flex: 1; padding: 10px; background: #000; color: white; border: 1px solid #444; outline: none; }
+        #send-btn { background: #005500; color: white; border: none; padding: 0 20px; font-weight: bold; }
     </style>
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-    <div class="status" id="status-text">STANDBY</div>
+
+    <div id="top-info">
+        <div id="my-id">Conectando...</div>
+        <div class="status" id="status-text">STANDBY</div>
+        <div id="last-seen">Último Câmbio: --:--</div>
+    </div>
+
     <div id="ptt-btn">PTT</div>
+
+    <button id="replay-btn" onclick="pedirReplay()">↺ Ouvir Último</button>
+
+    <div id="chat-toggle" onclick="toggleChat()">
+        💬
+        <div id="badge">0</div>
+    </div>
+
+    <div id="chat-box">
+        <div style="padding:10px; text-align:center; background:#111; color:#666;" onclick="toggleChat()">▼ FECHAR CHAT ▼</div>
+        <div id="messages"></div>
+        <form id="input-area" onsubmit="sendMsg(event)">
+            <input id="msg-input" type="text" placeholder="Digite sua mensagem..." autocomplete="off">
+            <button id="send-btn">ENV</button>
+        </form>
+    </div>
 
     <script>
         const socket = io();
         const ptt = document.getElementById('ptt-btn');
         const status = document.getElementById('status-text');
-        let localStream;
+        const lastSeen = document.getElementById('last-seen');
+        const myIdDisplay = document.getElementById('my-id');
         
+        // Chat
+        const chatBox = document.getElementById('chat-box');
+        const badge = document.getElementById('badge');
+        const msgList = document.getElementById('messages');
+        let unreadCount = 0;
+        let isChatOpen = false;
+
         // Sons
         const sndOn = new Audio('https://www.soundjay.com/communication/sounds/radio-click-1.mp3');
         const sndOff = new Audio('https://www.soundjay.com/communication/sounds/radio-noise-3.mp3');
+        const sndMsg = new Audio('https://www.soundjay.com/buttons/sounds/button-16.mp3'); 
 
-        // Ativa áudio no primeiro clique (obrigatório para iPhone)
+        let localStream;
+        let mediaRecorder;
+
         document.body.addEventListener('click', async () => {
             if(!localStream) {
-                try { 
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     status.innerText = "SISTEMA PRONTO";
-                } catch(e) { alert("Microfone bloqueado!"); }
+                } catch(e) { alert("Microfone necessário!"); }
             }
         }, {once:true});
 
-        // Lógica de falar
+        socket.on('set_identity', (name) => {
+            myIdDisplay.innerText = "Você é: " + name;
+        });
+
+        // --- FUNÇÃO DE REPLAY (NOVA) ---
+        function pedirReplay() {
+            status.innerText = "BUSCANDO ÁUDIO...";
+            status.style.color = "yellow";
+            socket.emit('pedir_replay');
+        }
+
+        socket.on('receber_replay', (chunks) => {
+            status.innerText = "REPRODUZINDO...";
+            status.style.color = "#00ff41";
+            
+            // Junta os pedaços e toca
+            const blob = new Blob(chunks, { 'type' : 'audio/webm; codecs=opus' });
+            const audio = new Audio(URL.createObjectURL(blob));
+            
+            audio.play();
+            audio.onended = () => {
+                status.innerText = "STANDBY";
+            };
+        });
+
+        // --- RÁDIO AO VIVO ---
         function startTx(e) {
             if(e.cancelable) e.preventDefault();
             if(!localStream) return;
@@ -58,11 +158,9 @@
             status.style.color = "red";
             sndOn.play();
             socket.emit('start_tx');
-            
-            // Envia áudio em pedaços
-            window.mediaRecorder = new MediaRecorder(localStream);
-            window.mediaRecorder.ondataavailable = e => socket.emit('voice_data', e.data);
-            window.mediaRecorder.start(100);
+            mediaRecorder = new MediaRecorder(localStream);
+            mediaRecorder.ondataavailable = e => socket.emit('voice_data', e.data);
+            mediaRecorder.start(100);
         }
 
         function endTx(e) {
@@ -70,22 +168,67 @@
             ptt.classList.remove('transmitting');
             status.innerText = "STANDBY";
             status.style.color = "#00ff41";
-            if(window.mediaRecorder) window.mediaRecorder.stop();
+            if(mediaRecorder) mediaRecorder.stop();
             sndOff.play();
             socket.emit('end_tx');
         }
 
-        // Eventos
         ptt.addEventListener('mousedown', startTx); ptt.addEventListener('mouseup', endTx);
         ptt.addEventListener('touchstart', startTx, {passive:false}); ptt.addEventListener('touchend', endTx, {passive:false});
 
-        // Receber áudio
         socket.on('play_voice', (data) => {
             const audio = new Audio(URL.createObjectURL(new Blob([data])));
             audio.play();
         });
-        socket.on('remote_start_tx', () => { status.innerText = "RECEBENDO..."; status.style.color = "orange"; });
-        socket.on('remote_end_tx', () => { status.innerText = "STANDBY"; status.style.color = "#00ff41"; sndOff.play(); });
+
+        socket.on('remote_start_tx', (user) => {
+            status.innerText = "RECEBENDO: " + user; 
+            status.style.color = "orange";
+        });
+
+        socket.on('remote_end_tx', () => {
+            status.innerText = "STANDBY";
+            status.style.color = "#00ff41";
+            sndOff.play();
+            const now = new Date();
+            lastSeen.innerText = "Último Câmbio: " + now.toLocaleTimeString();
+        });
+
+        // --- CHAT ---
+        function toggleChat() {
+            isChatOpen = !isChatOpen;
+            if(isChatOpen) {
+                chatBox.classList.add('chat-open');
+                unreadCount = 0; 
+                badge.style.display = 'none';
+            } else {
+                chatBox.classList.remove('chat-open');
+            }
+        }
+
+        function sendMsg(e) {
+            e.preventDefault();
+            const input = document.getElementById('msg-input');
+            if(input.value.trim() !== "") {
+                socket.emit('send_text', input.value);
+                input.value = "";
+            }
+        }
+
+        socket.on('receive_text', (data) => {
+            const div = document.createElement('div');
+            div.className = 'msg-line';
+            div.innerHTML = `<span class="msg-user">${data.user}:</span> <span class="msg-text">${data.text}</span>`;
+            msgList.appendChild(div);
+            msgList.scrollTop = msgList.scrollHeight;
+
+            if(!isChatOpen) {
+                unreadCount++;
+                badge.innerText = unreadCount;
+                badge.style.display = 'flex';
+                sndMsg.play();
+            }
+        });
     </script>
 </body>
 </html>

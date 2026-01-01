@@ -4,30 +4,54 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const path = require('path');
 
-// Aponta para a pasta onde estará o HTML
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-io.on('connection', (socket) => {
-  console.log('Operador conectado: ' + socket.id);
+// Variável para guardar o último áudio (Memória RAM)
+let ultimoAudio = [];
 
-  // Recebe voz e repassa para todos
+io.on('connection', (socket) => {
+  const codinome = "Operador " + Math.floor(1000 + Math.random() * 9000);
+  console.log(codinome + ' conectado: ' + socket.id);
+
+  socket.emit('set_identity', codinome);
+
+  // --- VOZ ---
+  socket.on('start_tx', () => {
+    // Começou a falar? Limpa a memória anterior
+    ultimoAudio = []; 
+    socket.broadcast.emit('remote_start_tx', codinome);
+  });
+
   socket.on('voice_data', (data) => {
+    // Guarda o pedacinho na memória
+    ultimoAudio.push(data);
+    // E manda ao vivo para os outros
     socket.broadcast.emit('play_voice', data);
   });
 
-  // Sinais visuais (Luz vermelha e Chiado)
-  socket.on('start_tx', () => socket.broadcast.emit('remote_start_tx'));
-  socket.on('end_tx', () => socket.broadcast.emit('remote_end_tx'));
+  socket.on('end_tx', () => {
+    socket.broadcast.emit('remote_end_tx');
+  });
+
+  // --- REPLAY (NOVO) ---
+  socket.on('pedir_replay', () => {
+    if (ultimoAudio.length > 0) {
+        // Envia todos os pedacinhos de volta para quem pediu
+        socket.emit('receber_replay', ultimoAudio);
+    }
+  });
+
+  // --- CHAT ---
+  socket.on('send_text', (msg) => {
+    io.emit('receive_text', { user: codinome, text: msg });
+  });
 });
 
-// O servidor roda na porta 3000
 http.listen(3000, () => {
-  console.log('--------------------------------------');
-  console.log('RÁDIO LIGADO NA PORTA 3000');
-  console.log('Agora execute o Ngrok para gerar o link!');
-  console.log('--------------------------------------');
+  console.log('--- SISTEMA TÁTICO COM GRAVAÇÃO ---');
+  console.log('Rodando na porta 3000');
 });
